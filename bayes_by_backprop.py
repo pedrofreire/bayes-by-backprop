@@ -219,7 +219,7 @@ def train(
 
     for epoch in range(epochs):
         run_epoch(train_loader, train=True, epoch=epoch)
-        if epoch % 5 == 0:
+        if epoch % 3 == 0:
             run_epoch(test_loader, train=False, epoch=epoch)
 
 train()
