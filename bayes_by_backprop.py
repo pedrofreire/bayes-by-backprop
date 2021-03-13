@@ -151,12 +151,11 @@ def train(
     epochs=300,
     num_samples=5,
     batch_size=128,
-    lr=1e-2,
+    lr=1e-3,
     hidden_size=100,
     kl_const=1e-3,
 ):
     train_loader, test_loader = get_mnist(batch_size=batch_size)
-    num_batches = len(train_loader)
 
     input_size = 28**2
     output_size = 10
@@ -167,17 +166,19 @@ def train(
         BayesLinear(hidden_size, hidden_size),
         nn.ReLU(),
         BayesLinear(hidden_size, output_size),
-        nn.LogSoftmax(),
+        nn.LogSoftmax(dim=-1),
     )
 
     opt = optim.Adam(model.parameters(), lr=lr)
 
-    for epoch in range(epochs):
+    def run_epoch(dataloader, train, epoch):
+        num_batches = len(dataloader)
+
         total_loss = 0.0
         total_lh_loss = 0.0
         total_kl_loss = 0.0
         num_correct = 0
-        for i, (X, y) in enumerate(tqdm(train_loader, position=0, leave=True)):
+        for i, (X, y) in enumerate(tqdm(dataloader, position=0, leave=True)):
             X = X.to(DEVICE)
             y = y.to(DEVICE)
 
@@ -193,22 +194,32 @@ def train(
             kl_loss = kl_losses.mean()
             loss = kl_const * kl_loss + likelihood_loss
 
-            loss.backward()
-            opt.step()
-            opt.zero_grad()
+            if train:
+                loss.backward()
+                opt.step()
+                opt.zero_grad()
 
             total_loss += loss.item()
             total_lh_loss += likelihood_loss.item()
             total_kl_loss += kl_loss.item()
             num_correct += torch.sum(y_pred == y).item()
 
-        acc = num_correct / len(train_loader.dataset)
+        acc = num_correct / len(dataloader.dataset)
 
-        print('----------')
+        if train:
+            print('---train---')
+        else:
+            print('---test----')
         print(f'epoch: {epoch}')
         print(f'loss: {total_loss}')
         print(f'lh_loss: {total_lh_loss}')
         print(f'kl_loss: {total_kl_loss}')
         print(f'acc : {acc}')
+
+
+    for epoch in range(epochs):
+        run_epoch(train_loader, train=True, epoch=epoch)
+        if epoch % 5 == 0:
+            run_epoch(test_loader, train=False, epoch=epoch)
 
 train()
