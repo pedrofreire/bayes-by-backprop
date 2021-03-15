@@ -9,11 +9,6 @@ from torch import nn, optim
 from torch.nn import functional as F
 from torchvision import datasets, transforms
 
-if torch.cuda.is_available():
-    DEVICE = 'cuda'
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-else:
-    DEVICE = 'cpu'
 
 class BayesLinear(nn.Module):
     def __init__(self, in_features, out_features):
@@ -31,14 +26,11 @@ class BayesLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.W_mu, a=np.sqrt(5))
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.W_mu)
-        bound = 1 / np.sqrt(fan_in)
-        nn.init.uniform_(self.b_mu, -bound, bound)
-
+        MU_INIT_INTERVAL = (-0.2, 0.2)
         RHO_INIT_INTERVAL = (-5, -4)
-        nn.init.uniform_(self.W_mu, -0.2, 0.2)
-        nn.init.uniform_(self.b_mu, -0.2, 0.2)
+
+        nn.init.uniform_(self.W_mu, *MU_INIT_INTERVAL)
+        nn.init.uniform_(self.b_mu, *MU_INIT_INTERVAL)
         nn.init.uniform_(self.W_rho, *RHO_INIT_INTERVAL)
         nn.init.uniform_(self.b_rho, *RHO_INIT_INTERVAL)
 
@@ -67,7 +59,7 @@ class BayesLinear(nn.Module):
             self.in_features, self.out_features)
 
 
-def get_kl_loss(model, num_batches):
+def get_kl_loss(model):
     PI = torch.Tensor([0.5])
     SIGMA_1 = torch.exp(torch.Tensor([0.0]))
     SIGMA_2 = torch.exp(torch.Tensor([-6.0]))
@@ -81,8 +73,8 @@ def get_kl_loss(model, num_batches):
 
     def log_prior(w):
         return torch.sum(torch.logaddexp(
-            torch.log(PI) + log_gaussian(w, 0, SIGMA_1),
-            torch.log(1 - PI) + log_gaussian(w, 0, SIGMA_2),
+            torch.log(PI) * log_gaussian(w, 0, SIGMA_1),
+            torch.log(1 - PI) * log_gaussian(w, 0, SIGMA_2),
         ))
 
     def layer_log_q(layer):
@@ -99,7 +91,7 @@ def get_kl_loss(model, num_batches):
     for layer in model:
         if isinstance(layer, BayesLinear):
             loss += layer_log_q(layer) - layer_log_prior(layer)
-    return loss / num_batches
+    return loss
 
 
 def download_mnist():
@@ -148,78 +140,54 @@ def get_mnist(batch_size=64):
 
 
 def train(
-    epochs=300,
+    epochs=30,
     num_samples=5,
     batch_size=128,
-    lr=1e-3,
-    hidden_size=100,
-    kl_const=1e-3,
+    lr=1e-2,
 ):
     train_loader, test_loader = get_mnist(batch_size=batch_size)
+    num_batches = len(train_loader)
 
-    input_size = 28**2
-    output_size = 10
+    inp_sz = 28**2
+    hid_sz = 100
+    out_sz = 10
     model = nn.Sequential(
         nn.Flatten(),
-        BayesLinear(input_size, hidden_size),
+        BayesLinear(inp_sz, hid_sz),
         nn.ReLU(),
-        BayesLinear(hidden_size, hidden_size),
+        BayesLinear(hid_sz, hid_sz),
         nn.ReLU(),
-        BayesLinear(hidden_size, output_size),
-        nn.LogSoftmax(dim=-1),
+        BayesLinear(hid_sz, out_sz),
     )
 
     opt = optim.Adam(model.parameters(), lr=lr)
 
-    def run_epoch(dataloader, train, epoch):
-        num_batches = len(dataloader)
-
+    for epoch in range(epochs):
         total_loss = 0.0
-        total_lh_loss = 0.0
-        total_kl_loss = 0.0
         num_correct = 0
-        for i, (X, y) in enumerate(tqdm(dataloader, position=0, leave=True)):
-            X = X.to(DEVICE)
-            y = y.to(DEVICE)
+        for i, (X, y) in enumerate(tqdm(train_loader)):
+            loss = 0.0
+            for _ in range(num_samples):
+                logits = model(X)
+                y_pred = torch.argmax(logits, dim=1)
 
-            cur_batch_size = y.shape[0]
-            log_probs = torch.zeros(num_samples, cur_batch_size, output_size)
-            kl_losses = torch.zeros(num_samples)
-            for i in range(num_samples):
-                log_probs[i] = model(X)
-                kl_losses[i] = get_kl_loss(model, num_batches)
+                likelihood_loss = F.cross_entropy(logits, y)
+                kl_loss = get_kl_loss(model) / num_batches
+                loss += kl_loss + likelihood_loss
 
-            y_pred = torch.argmax(log_probs.mean(dim=0), dim=1)
-            likelihood_loss = F.cross_entropy(log_probs.mean(dim=0), y)
-            kl_loss = kl_losses.mean()
-            loss = kl_const * kl_loss + likelihood_loss
+                total_loss += loss.item() / num_samples
+                num_correct += torch.sum(y_pred == y).item() / num_samples
 
-            if train:
-                loss.backward()
-                opt.step()
-                opt.zero_grad()
+            loss.backward()
+            opt.step()
+            opt.zero_grad()
 
-            total_loss += loss.item()
-            total_lh_loss += likelihood_loss.item()
-            total_kl_loss += kl_loss.item()
-            num_correct += torch.sum(y_pred == y).item()
+        acc = num_correct / len(train_loader.dataset)
 
-        acc = num_correct / len(dataloader.dataset)
-
-        if train:
-            print('---train---')
-        else:
-            print('---test----')
+        print('----------')
         print(f'epoch: {epoch}')
         print(f'loss: {total_loss}')
-        print(f'lh_loss: {total_lh_loss}')
-        print(f'kl_loss: {total_kl_loss}')
         print(f'acc : {acc}')
 
-
-    for epoch in range(epochs):
-        run_epoch(train_loader, train=True, epoch=epoch)
-        if epoch % 3 == 0:
-            run_epoch(test_loader, train=False, epoch=epoch)
-
-#train()
+if __name__ == '__main__':
+    train()
