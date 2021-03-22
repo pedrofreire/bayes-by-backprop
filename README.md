@@ -5,9 +5,9 @@ Code bayesian neural networks as described in [Weight Uncertainty in Neural Netw
 
 `bayes_by_backprop.py`: implementation of Bayesian fully connected layers, and corresponding complexity cost.
 
-`mnist.py`: BNN experiments for MNIST digit classification.
+`mnist.py`: MNIST digit classification experiments.
 
-`regression.py`: BNN experiments for regression problems.
+`regression.py`: Regression experiments.
 
-`bandits.py`: BNN experiments for bandits problems.
+`bandits.py`: Bandits problems experiments.
 
