@@ -1,4 +1,4 @@
-Code bayesian neural networks as described in [Weight Uncertainty in Neural Networks (Blundell et al., 2015)](https://arxiv.org/abs/1505.05424).
+Implementation of bayesian neural networks, as described in [Weight Uncertainty in Neural Networks (Blundell et al., 2015)](https://arxiv.org/abs/1505.05424).
 
 
 ## Content
