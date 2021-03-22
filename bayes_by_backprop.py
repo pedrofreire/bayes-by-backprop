@@ -66,10 +66,10 @@ class BayesLinear(nn.Module):
             self.in_features, self.out_features)
 
 
-def get_kl_loss(model, num_batches):
-    PI = torch.Tensor([0.5])
-    SIGMA_1 = torch.exp(torch.Tensor([0.0]))
-    SIGMA_2 = torch.exp(torch.Tensor([-6.0]))
+def get_kl_loss(model, num_batches,rho=0.5,s=[0.0,-6.0]):
+    PI = torch.Tensor([rho])
+    SIGMA_1 = torch.exp(torch.Tensor([s[0]]))
+    SIGMA_2 = torch.exp(torch.Tensor([s[1]]))
 
     def log_gaussian(x, mu, sigma):
         k = torch.log(2 * np.pi * sigma**2)
@@ -79,17 +79,19 @@ def get_kl_loss(model, num_batches):
         return torch.sum(log_gaussian(x, mu, std))
 
     def log_prior(w):
-        return torch.sum(torch.logaddexp(
-            torch.log(PI) + log_gaussian(w, 0, SIGMA_1),
-            torch.log(1 - PI) + log_gaussian(w, 0, SIGMA_2),
-        ))
-
+        if rho<1.0:
+            return torch.sum(torch.logaddexp(
+                torch.log(PI) + log_gaussian(w, 0, SIGMA_1),
+                torch.log(1 - PI) + log_gaussian(w, 0, SIGMA_2),
+            ))
+        return log_gaussian(w, 0, SIGMA_1).sum()
     def layer_log_q(layer):
         W_log_q = log_q(layer.last_W, layer.W_mu, layer.W_std)
         b_log_q = log_q(layer.last_b, layer.b_mu, layer.b_std)
         return W_log_q + b_log_q
 
     def layer_log_prior(layer):
+        
         W_log_prior = log_prior(layer.last_W)
         b_log_prior = log_prior(layer.last_b)
         return W_log_prior + b_log_prior
