@@ -1,3 +1,4 @@
+from collections import defaultdict
 import time
 
 from tqdm import tqdm
@@ -37,8 +38,6 @@ class BayesLinear(nn.Module):
         nn.init.uniform_(self.b_mu, -bound, bound)
 
         RHO_INIT_INTERVAL = (-5, -4)
-        nn.init.uniform_(self.W_mu, -0.2, 0.2)
-        nn.init.uniform_(self.b_mu, -0.2, 0.2)
         nn.init.uniform_(self.W_rho, *RHO_INIT_INTERVAL)
         nn.init.uniform_(self.b_rho, *RHO_INIT_INTERVAL)
 
@@ -152,9 +151,34 @@ def train(
     num_samples=5,
     batch_size=128,
     lr=1e-3,
-    hidden_size=100,
-    kl_const=1e-3,
+    hidden_size=400,
+    kl_const=1e-6,
+    verbose=True,
 ):
+    train_log = defaultdict(list)
+    def log_vars(lcls):
+        def printv(*args, **kwargs):
+            if verbose:
+                print(*args, **kwargs)
+
+        train = lcls['train']
+        epoch = lcls['epoch']
+
+        prefix = 'train' if train else 'test'
+
+        printv(f'epoch : {epoch}')
+        for varname in (
+            'total_loss',
+            'total_lh_loss',
+            'total_kl_loss',
+            'acc',
+        ):
+            label = f'{prefix}/{varname}'
+            value = lcls[varname]
+            train_log[label].append((epoch, value))
+            printv(f'{label} : {value:.4f}')
+
+
     train_loader, test_loader = get_mnist(batch_size=batch_size)
 
     input_size = 28**2
@@ -168,10 +192,10 @@ def train(
         BayesLinear(hidden_size, output_size),
         nn.LogSoftmax(dim=-1),
     )
-
     opt = optim.Adam(model.parameters(), lr=lr)
 
-    def run_epoch(dataloader, train, epoch):
+    def run_epoch(train, epoch):
+        dataloader = train_loader if train else test_loader
         num_batches = len(dataloader)
 
         total_loss = 0.0
@@ -206,20 +230,59 @@ def train(
 
         acc = num_correct / len(dataloader.dataset)
 
-        if train:
-            print('---train---')
-        else:
-            print('---test----')
-        print(f'epoch: {epoch}')
-        print(f'loss: {total_loss}')
-        print(f'lh_loss: {total_lh_loss}')
-        print(f'kl_loss: {total_kl_loss}')
-        print(f'acc : {acc}')
-
+        log_vars(locals())
 
     for epoch in range(epochs):
-        run_epoch(train_loader, train=True, epoch=epoch)
+        run_epoch(train=True, epoch=epoch)
         if epoch % 3 == 0:
-            run_epoch(test_loader, train=False, epoch=epoch)
+            run_epoch(train=False, epoch=epoch)
 
-train()
+    return train_log
+
+def save_results(train_log):
+    import pickle
+    with open('results.pkl', 'wb') as f:
+        pickle.dump(train_log, f)
+
+def plot_results():
+    import matplotlib.pyplot as plt
+    import pickle
+
+    with open('results.pkl', 'rb') as f:
+        train_log = pickle.load(f)
+
+    test_acc_points = train_log['test/acc']
+    test_epochs, test_accs = np.array(test_acc_points).T
+    test_errs = 1 - test_accs
+
+    plt.plot(test_epochs, test_errs, label='test error')
+    plt.legend()
+    plt.show()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train', default=True, action='store_true')
+    parser.add_argument('--no_train', dest='train', action='store_false')
+    parser.add_argument('--plot', default=False, action='store_true')
+
+    parser.add_argument('-e', '--epochs', type=int, default=30)
+    parser.add_argument('-s', '--num_samples', type=int, default=5)
+    parser.add_argument('-lr', '--learning_rate', type=float, default=1e-3)
+    parser.add_argument('-hs', '--hidden_size', type=int, default=100)
+    parser.add_argument('-kl', '--kl_const', type=float, default=1e-3)
+
+    args = parser.parse_args()
+
+    if args.train:
+        train_log = train(
+            epochs=args.epochs,
+            num_samples=args.num_samples,
+            lr=args.learning_rate,
+            hidden_size=args.hidden_size,
+            kl_const=args.kl_const,
+        )
+        save_results(train_log)
+    if args.plot:
+        plot_results()
+
