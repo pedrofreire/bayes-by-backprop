@@ -17,7 +17,7 @@ else:
     DEVICE = 'cpu'
 
 class BayesLinear(nn.Module):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, rho_ii=(-5,-3)):
         super().__init__()
 
         self.in_features = in_features
@@ -29,17 +29,16 @@ class BayesLinear(nn.Module):
         self.b_mu = nn.Parameter(torch.Tensor(out_features))
         self.b_rho = nn.Parameter(torch.Tensor(out_features))
 
-        self.reset_parameters()
+        self.reset_parameters(rho_ii)
 
-    def reset_parameters(self):
+    def reset_parameters(self, rho_init_range=(-5, -3)):
         nn.init.kaiming_uniform_(self.W_mu, a=np.sqrt(5))
         fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.W_mu)
         bound = 1 / np.sqrt(fan_in)
         nn.init.uniform_(self.b_mu, -bound, bound)
 
-        RHO_INIT_INTERVAL = (-5, -4)
-        nn.init.uniform_(self.W_rho, *RHO_INIT_INTERVAL)
-        nn.init.uniform_(self.b_rho, *RHO_INIT_INTERVAL)
+        nn.init.uniform_(self.W_rho, *rho_init_range)
+        nn.init.uniform_(self.b_rho, *rho_init_range)
 
     @property
     def W_std(self):
@@ -285,4 +284,3 @@ if __name__ == '__main__':
         save_results(train_log)
     if args.plot:
         plot_results()
-
