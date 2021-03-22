@@ -1,10 +1,12 @@
-from importlib import reload
-import bayes_by_backprop
-reload(bayes_by_backprop)
-BayesLinear=bayes_by_backprop.BayesLinear
+import matplotlib.pyplot as plt
+import numpy as np
 
 
+import torch
+from torch import nn, optim
+from torch.nn import functional as F
 
+from bayes_by_backprop import BayesLinear, get_kl_loss
 
 class Reg_DS:
     def __init__(self,N=1000,sig=0.02,norm=True):
@@ -78,7 +80,7 @@ def train(
 
 if __name__=='__main__':
     log=[]
-    model,log=train(100,lr=1e-2,bayesian=True,num_samples=5,BETA=1e-5,log=log,hid_sz=100,log=log)
+    model,log=train(100,lr=1e-2,bayesian=True,num_samples=5,BETA=1e-5,log=log,hid_sz=100)
     N=1000
     NS=100
     samples=torch.zeros(NS,N)

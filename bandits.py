@@ -1,10 +1,14 @@
 from random import choice
-from bayes_by_backprop import BayesLinear
-import pandas as pd   
+
+import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
 
-BayesLinear=bayes_by_backprop.BayesLinear
+import torch
+from torch import nn, optim
+from torch.nn import functional as F
 
+from bayes_by_backprop import BayesLinear, get_kl_loss
 
 
 class Mushroom_Bandit:
@@ -17,74 +21,74 @@ class Mushroom_Bandit:
         self.y=torch.tensor(y)
         self.cum_reg=[0]
         self.plays=[]
-    
+
     def get_ctx(self):
         #self.i=torch.randint(0,len(self.x),(1))
         self.i=np.random.randint(0,len(self.x))
         return self.x[self.i]
-    
+
     def get_reward(self,a):
         y=self.y[self.i]
         mer=0 if y==1 else 5
-        
+
         self.plays.append((1-a,y))
         if a==0: ##don't eat
             self.cum_reg.append(mer+self.cum_reg[-1])
             return 0
-        
+
         if y==0: ##eat and not poisonous
             self.cum_reg.append(self.cum_reg[-1])
             return 5
-        
+
         ##eat and poisonous
         self.cum_reg.append(self.cum_reg[-1]+15)
-        
+
         p=torch.rand(1)
         if p>=0.5:
             return 5
-        
+
         return -35
-    
 
 
-    
-  
+
+
+
 class Agent:
     def __init__(self,bandit,num_batches):
         self.buffer=[]
         self.bandit=bandit
         self.BUFFER_SIZE=64*num_batches
-    
-    
+
+
     def update():
         pass
-        
-    
+
+
     def get_action(self,ctx):
         pass
-    
+
     def step(self):
         ctx=self.bandit.get_ctx()
         if len(self.buffer)<self.BUFFER_SIZE:
             action=choice([0,1])
         else:
             action=self.get_action(ctx.to(dtype=torch.float))
-        
+
         rwd=self.bandit.get_reward(action)
-        
+
         if len(self.buffer)>=self.BUFFER_SIZE:
             self.buffer.pop(0)
-        
+
         self.buffer.append((torch.tensor(ctx,dtype=torch.float),
                             torch.tensor(action,dtype=torch.long),
                             torch.tensor(rwd,dtype=torch.float)))
-        
+
         if len(self.buffer)>=self.BUFFER_SIZE:
             #idxs=torch.randperm(len(self.buffer)).cpu().numpy()[:64]
             #actions=torch.tensor([self.buffer[i][1] for i in idxs],dtype=torch.long)
             #ctxs=torch.stack([self.buffer[i][0] for i in idxs]).to(dtype=torch.float)
             #rwds=torch.tensor([self.buffer[i][2] for i in idxs],dtype=torch.float)
-            
+
             self.update()
 
 class Eps_Greedy(Agent):
@@ -102,17 +106,17 @@ class Eps_Greedy(Agent):
         if cuda: self.net=self.net.to(device='cuda')
         self.log=[]
         self.optimizer=torch.optim.SGD(self.net.parameters(),lr=1e-2)
-    
+
     def get_action(self,ctx):
         p=torch.rand(1)
-        
+
         if p<=self.eps:
             return choice([0,1])
         with torch.no_grad():
             if self.cuda: ctx=ctx.cuda()
             return self.net(ctx).argmax()
-            
-    
+
+
     def update(self):
         #if self.cuda: c,a,r=c.cuda(),a.cuda(),r.cuda()
         dl=torch.utils.data.DataLoader(self.buffer,64,True)
@@ -141,7 +145,7 @@ class Bayesian_Agent(Agent):
         if cuda: self.net=self.net.to(device='cuda')
         self.optimizer=torch.optim.SGD(self.net.parameters(),lr=lr)
         self.log=[]
-    
+
     def get_action(self,ctx):
         if self.cuda: ctx=ctx.cuda()
         mean_logits=0.0
@@ -150,8 +154,8 @@ class Bayesian_Agent(Agent):
                 mean_logits+=self.net(ctx)
 
         return mean_logits.argmax()
-            
-    
+
+
     def update(self):
         #if self.cuda: c,a,r=c.cuda(),a.cuda(),r.cuda()
         dl=torch.utils.data.DataLoader(self.buffer,64,True)
@@ -163,7 +167,7 @@ class Bayesian_Agent(Agent):
                 kl_losses[i]=get_kl_loss(self.net, 1)
                 reg_losses[i]=((pred_r.reshape(-1)-r)**2).mean()
             kl_loss,reg_loss= kl_losses.mean(),reg_losses.mean()
-                    
+
             beta_= 2**(self.num_batches-i)/(2**self.num_batches)* self.beta if self.rescale_kl else self.beta
             loss=self.beta*kl_loss+reg_loss
 
@@ -174,26 +178,22 @@ class Bayesian_Agent(Agent):
 
 if __name__=='__main__':
     bandits=[Mushroom_Bandit() for _ in range(4)]
+    cuda = torch.cuda.is_available()
     #agent=Eps_Greedy(bandit,0.01)
-    agents=[Bayesian_Agent(bandits[0],beta=1e-8,lr=1e-2,num_batches=16),
-            Eps_Greedy(bandits[0],0.0),
-            Eps_Greedy(bandits[1],0.01),
-            Eps_Greedy(bandits[2],0.05)]
+    agents=[Bayesian_Agent(bandits[0],beta=1e-8,lr=1e-2,num_batches=16, cuda=cuda),
+            Eps_Greedy(bandits[0],0.0, cuda=cuda),
+            Eps_Greedy(bandits[1],0.01, cuda=cuda),
+            Eps_Greedy(bandits[2],0.05, cuda=cuda)]
 
+    colab = False
     from tqdm import tqdm
     for agent,b,tag in zip(agents,bandits,['greedy','1pc_greedy','5pc_greedy']):
         for i in tqdm(range(40000),leave=True):
             agent.step()
             #if i%500==0 and i>=500: print(f'cum_reg {i} ',(b.cum_reg[-1]-b.cum_reg[-100])/100)
-        np.save(f'/content/drive/MyDrive/colab_data/{tag}',(b.cum_reg,agent.log))
-        plt.plot(b.cum_reg,label=tag)b
-
+        if colab:
+            np.save(f'/content/drive/MyDrive/colab_data/{tag}',(b.cum_reg,agent.log))
+        plt.plot(b.cum_reg,label=tag)
 
     plt.legend()
-    
-            
-    
-    
-        
-        
-    
+    plt.show()
