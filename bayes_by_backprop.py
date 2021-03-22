@@ -19,7 +19,7 @@ class BayesLinear(nn.Module):
 
         self.reset_parameters(rho_ii)
 
-    def reset_parameters(self, rho_init_range=(-5, -3)):
+    def reset_parameters(self, rho_init_range):
         nn.init.kaiming_uniform_(self.W_mu, a=np.sqrt(5))
         fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.W_mu)
         bound = 1 / np.sqrt(fan_in)
